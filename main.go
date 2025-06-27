@@ -1,6 +1,7 @@
 package main
 
 import (
+	"bytes"
 	"fmt"
 	"io"
 	"net/http"
@@ -25,16 +26,14 @@ type model struct {
 	client *http.Client
 
 	currentMode  mode
+	methodIndex  int
 	url          textinput.Model
 	responseView viewport.Model
 }
 
 func initialModel() model {
-	url := textinput.New()
-	url.Prompt = "GET > "
-
 	return model{
-		url:    url,
+		url:    textinput.New(),
 		client: http.DefaultClient,
 	}
 }
@@ -46,6 +45,19 @@ func (m model) Init() tea.Cmd {
 func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	var reqCmd, respCmd tea.Cmd
 	switch m.currentMode {
+	case modeOverview:
+		switch msg := msg.(type) {
+		case tea.KeyMsg:
+			switch msg.String() {
+			case "u":
+				m.currentMode = modeUrl
+				m.url.Focus()
+			case "r":
+				m.currentMode = modeResponse
+			case "m":
+				m.methodIndex = (m.methodIndex + 1) % 2
+			}
+		}
 	case modeUrl:
 		m.url, reqCmd = m.url.Update(msg)
 	case modeResponse:
@@ -59,23 +71,22 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		switch msg.String() {
 		case "ctrl+c":
 			return m, tea.Quit
-		case "u":
-			if m.currentMode == modeOverview {
-				m.currentMode = modeUrl
-				m.url.Focus()
-			}
-		case "r":
-			if m.currentMode == modeOverview {
-				m.currentMode = modeResponse
-			}
 		case "esc":
 			m.url.Blur()
 			m.currentMode = modeOverview
 		case "enter":
-			resp, err := m.client.Get(m.url.Value())
+			var resp *http.Response
+			var err error
+			switch m.methodIndex {
+			case 0:
+				resp, err = m.client.Get(m.url.Value())
+			case 1:
+				resp, err = m.client.Post(m.url.Value(), "application/json", bytes.NewReader([]byte("{}")))
+			}
 			if err != nil {
 				break
 			}
+			defer resp.Body.Close()
 			res, err := io.ReadAll(resp.Body)
 			if err != nil {
 				break
@@ -83,6 +94,14 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			m.responseView.SetContent(string(res))
 		}
 	}
+	var method string
+	switch m.methodIndex {
+	case 0:
+		method = "GET"
+	case 1:
+		method = "POST"
+	}
+	m.url.Prompt = fmt.Sprintf("%s > ", method)
 	return m, tea.Batch(reqCmd, respCmd)
 }
 
