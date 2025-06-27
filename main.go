@@ -13,22 +13,29 @@ import (
 
 const gap = "\n\n"
 
+type mode int
+
+const (
+	modeOverview = iota
+	modeUrl
+	modeResponse
+)
+
 type model struct {
 	client *http.Client
-	ready  bool
 
-	request  textinput.Model
-	response viewport.Model
+	currentMode  mode
+	url          textinput.Model
+	responseView viewport.Model
 }
 
 func initialModel() model {
-	request := textinput.New()
-	request.Prompt = "URL > "
-	request.Focus()
+	url := textinput.New()
+	url.Prompt = "GET > "
 
 	return model{
-		request: request,
-		client:  http.DefaultClient,
+		url:    url,
+		client: http.DefaultClient,
 	}
 }
 
@@ -38,23 +45,34 @@ func (m model) Init() tea.Cmd {
 
 func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	var reqCmd, respCmd tea.Cmd
-	m.request, reqCmd = m.request.Update(msg)
-	m.response, respCmd = m.response.Update(msg)
+	switch m.currentMode {
+	case modeUrl:
+		m.url, reqCmd = m.url.Update(msg)
+	case modeResponse:
+		m.responseView, respCmd = m.responseView.Update(msg)
+	}
 
 	switch msg := msg.(type) {
 	case tea.WindowSizeMsg:
-		m.response = viewport.New(msg.Width, msg.Height-lipgloss.Height(m.request.View())-lipgloss.Height(gap))
-		m.ready = true
+		m.responseView = viewport.New(msg.Width, msg.Height-lipgloss.Height(m.url.View())-lipgloss.Height(gap))
 	case tea.KeyMsg:
 		switch msg.String() {
 		case "ctrl+c":
 			return m, tea.Quit
-		case "ctrl+n":
-			m.response.ScrollDown(1)
-		case "ctrl+p":
-			m.response.ScrollUp(1)
+		case "u":
+			if m.currentMode == modeOverview {
+				m.currentMode = modeUrl
+				m.url.Focus()
+			}
+		case "r":
+			if m.currentMode == modeOverview {
+				m.currentMode = modeResponse
+			}
+		case "esc":
+			m.url.Blur()
+			m.currentMode = modeOverview
 		case "enter":
-			resp, err := m.client.Get(m.request.Value())
+			resp, err := m.client.Get(m.url.Value())
 			if err != nil {
 				break
 			}
@@ -62,14 +80,14 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			if err != nil {
 				break
 			}
-			m.response.SetContent(string(res))
+			m.responseView.SetContent(string(res))
 		}
 	}
 	return m, tea.Batch(reqCmd, respCmd)
 }
 
 func (m model) View() string {
-	return fmt.Sprintf("%s%s%s", m.request.View(), gap, m.response.View())
+	return fmt.Sprintf("%s%s%s", m.url.View(), gap, m.responseView.View())
 }
 
 func main() {
