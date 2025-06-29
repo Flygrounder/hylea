@@ -12,7 +12,7 @@ import (
 	"github.com/charmbracelet/lipgloss"
 )
 
-const gap = "\n\n"
+const gap = "\n"
 
 type mode int
 
@@ -91,7 +91,7 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	case tea.WindowSizeMsg:
 		m.width = msg.Width
 		m.height = msg.Height
-		m.responseView = viewport.New(msg.Width-2, msg.Height-3-lipgloss.Height(m.renderUrlView()))
+		m.responseView = viewport.New(msg.Width-2, msg.Height-2-lipgloss.Height(m.renderUrlView()))
 	case tea.KeyMsg:
 		switch msg.String() {
 		case "esc":
@@ -121,15 +121,28 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 }
 
 func (m model) View() string {
-	return fmt.Sprintf("%s%s%s", m.renderUrlView(), gap, m.renderResponseView())
+	return fmt.Sprintf("%s%s%s", lipgloss.JoinHorizontal(lipgloss.Top, m.renderMethod(), m.renderUrlView()), gap, m.renderResponseView())
 }
 
 func (m model) renderUrlView() string {
-	return lipgloss.NewStyle().Width(m.width - 2).Border(lipgloss.NormalBorder()).Render(m.url.View())
+	style := lipgloss.NewStyle().Width(m.width - 2 - lipgloss.Width(m.renderMethod())).Border(lipgloss.NormalBorder())
+	if m.currentMode == modeUrl {
+		style = style.BorderForeground(lipgloss.Color("#ff0000"))
+	}
+	return style.Render(m.url.View())
+}
+
+func (m model) renderMethod() string {
+	style := lipgloss.NewStyle().Border(lipgloss.NormalBorder()).Width(4)
+	return style.Render(m.currentMethod.toString())
 }
 
 func (m model) renderResponseView() string {
-	return lipgloss.NewStyle().Border(lipgloss.NormalBorder()).Render(m.responseView.View())
+	style := lipgloss.NewStyle().Border(lipgloss.NormalBorder())
+	if m.currentMode == modeResponse {
+		style = style.BorderForeground(lipgloss.Color("#ff0000"))
+	}
+	return style.Render(m.responseView.View())
 }
 
 func main() {
