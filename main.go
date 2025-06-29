@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"io"
 	"net/http"
+	"time"
 
 	"github.com/charmbracelet/bubbles/stopwatch"
 	"github.com/charmbracelet/bubbles/textinput"
@@ -60,7 +61,7 @@ func initialModel() model {
 	return model{
 		url:     url,
 		client:  http.DefaultClient,
-		elapsed: stopwatch.New(),
+		elapsed: stopwatch.NewWithInterval(time.Millisecond),
 	}
 }
 
@@ -133,7 +134,7 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 					response: string(res),
 				}
 			}
-			timeCmd = m.elapsed.Start()
+			timeCmd = tea.Sequence(m.elapsed.Reset(), m.elapsed.Start())
 		}
 	}
 	return m, tea.Batch(reqCmd, respCmd, httpCmd, elapsedCmd, timeCmd)
