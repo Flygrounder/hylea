@@ -9,7 +9,6 @@ import (
 	"time"
 
 	"github.com/charmbracelet/bubbles/list"
-	"github.com/charmbracelet/bubbles/stopwatch"
 	"github.com/charmbracelet/bubbles/textinput"
 	"github.com/charmbracelet/bubbles/viewport"
 	tea "github.com/charmbracelet/bubbletea"
@@ -67,9 +66,15 @@ type model struct {
 	currentMode  mode
 	url          textinput.Model
 	responseView viewport.Model
-	elapsed      stopwatch.Model
-	requestTag   int
+	timer        requestTimer
 	methodView   list.Model
+}
+
+type requestTimer struct {
+	isActive     bool
+	requestTag   int
+	lastStart    time.Time
+	lastDuration time.Duration
 }
 
 type responseMessage struct {
@@ -91,7 +96,6 @@ func initialModel() model {
 	return model{
 		url:        url,
 		client:     http.DefaultClient,
-		elapsed:    stopwatch.NewWithInterval(time.Millisecond),
 		methodView: methodView,
 	}
 }
@@ -102,7 +106,6 @@ func (m model) Init() tea.Cmd {
 
 func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	var handlerCmd, elapsedCmd tea.Cmd
-	m.elapsed, elapsedCmd = m.elapsed.Update(msg)
 
 	switch m.currentMode {
 	case modeOverview:
@@ -124,10 +127,11 @@ func (m *model) handleGlobalEvents(msg tea.Msg) tea.Cmd {
 	var timeCmd tea.Cmd
 	switch msg := msg.(type) {
 	case responseMessage:
-		if m.requestTag != msg.tag {
+		if m.timer.requestTag != msg.tag {
 			break
 		}
-		timeCmd = m.elapsed.Stop()
+		m.timer.isActive = false
+		m.timer.lastDuration = time.Since(m.timer.lastStart)
 		if msg.err != nil {
 			break
 		}
@@ -207,14 +211,16 @@ func (m *model) handleMessageInUrlMode(msg tea.Msg) tea.Cmd {
 }
 
 func (m *model) startRequest() tea.Cmd {
-	m.requestTag++
+	m.timer.isActive = true
+	m.timer.requestTag++
+	m.timer.lastStart = time.Now()
 	httpCmd := func() tea.Msg {
 		var resp *http.Response
 		var err error
 		it, ok := m.methodView.SelectedItem().(item)
 		if !ok {
 			return responseMessage{
-				tag: m.requestTag,
+				tag: m.timer.requestTag,
 				err: errors.New("failed to get selected item"),
 			}
 		}
@@ -226,7 +232,7 @@ func (m *model) startRequest() tea.Cmd {
 		}
 		if err != nil {
 			return responseMessage{
-				tag: m.requestTag,
+				tag: m.timer.requestTag,
 				err: fmt.Errorf("failed to send request: %w", err),
 			}
 		}
@@ -234,16 +240,16 @@ func (m *model) startRequest() tea.Cmd {
 		res, err := io.ReadAll(resp.Body)
 		if err != nil {
 			return responseMessage{
-				tag: m.requestTag,
+				tag: m.timer.requestTag,
 				err: fmt.Errorf("failed to read response: %w", err),
 			}
 		}
 		return responseMessage{
-			tag:      m.requestTag,
+			tag:      m.timer.requestTag,
 			response: string(res),
 		}
 	}
-	return tea.Sequence(m.elapsed.Reset(), m.elapsed.Start(), httpCmd)
+	return httpCmd
 }
 
 func (m *model) handleMessageInMethodMode(msg tea.Msg) tea.Cmd {
@@ -296,7 +302,17 @@ func (m model) renderResponseView() string {
 
 func (m model) renderStatusBar() string {
 	style := lipgloss.NewStyle().Width(m.width - 2).Border(lipgloss.NormalBorder())
-	return style.Render(m.elapsed.View())
+	return style.Render(m.renderTimer())
+}
+
+func (m model) renderTimer() string {
+	var duration time.Duration
+	if m.timer.isActive {
+		duration = time.Since(m.timer.lastStart)
+	} else {
+		duration = m.timer.lastDuration
+	}
+	return duration.Round(time.Millisecond).String()
 }
 
 func main() {
