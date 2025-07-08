@@ -9,6 +9,7 @@ import (
 	"time"
 
 	"github.com/charmbracelet/bubbles/list"
+	"github.com/charmbracelet/bubbles/textarea"
 	"github.com/charmbracelet/bubbles/textinput"
 	"github.com/charmbracelet/bubbles/viewport"
 	tea "github.com/charmbracelet/bubbletea"
@@ -57,17 +58,23 @@ const (
 	modeUrl
 	modeResponse
 	modeMethod
+	modeRequest
 )
 
 type model struct {
+	dimensions   modelDimensions
 	client       *http.Client
-	width        int
-	height       int
 	currentMode  mode
 	url          textinput.Model
+	requestView  textarea.Model
 	responseView viewport.Model
 	timer        requestTimer
 	methodView   list.Model
+}
+
+type modelDimensions struct {
+	width  int
+	height int
 }
 
 type requestTimer struct {
@@ -94,9 +101,10 @@ func initialModel() model {
 	methodView.Select(0)
 	methodView.DisableQuitKeybindings()
 	return model{
-		url:        url,
-		client:     http.DefaultClient,
-		methodView: methodView,
+		url:         url,
+		client:      http.DefaultClient,
+		methodView:  methodView,
+		requestView: textarea.New(),
 	}
 }
 
@@ -116,6 +124,8 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		handlerCmd = m.handleMessageInResponseMode(msg)
 	case modeMethod:
 		handlerCmd = m.handleMessageInMethodMode(msg)
+	case modeRequest:
+		handlerCmd = m.handleMessageInRequestMode(msg)
 	}
 
 	globalCmd := m.handleGlobalEvents(msg)
@@ -137,13 +147,35 @@ func (m *model) handleGlobalEvents(msg tea.Msg) tea.Cmd {
 		}
 		m.responseView.SetContent(msg.response)
 	case tea.WindowSizeMsg:
-		m.width = msg.Width
-		m.height = msg.Height
-		m.responseView.Width = msg.Width - 2
-		m.responseView.Height = msg.Height - 2 - lipgloss.Height(m.renderUrlView()) - lipgloss.Height(m.renderStatusBar())
+		m.dimensions = modelDimensions{
+			width:  msg.Width,
+			height: msg.Height,
+		}
+		m.requestView.SetWidth(msg.Width/2 - 2)
+		m.requestView.SetHeight(msg.Height - 2 - lipgloss.Height(m.renderUrlView(m.dimensions)))
+
+		m.responseView.Width = msg.Width/2 - 2
+		m.responseView.Height = msg.Height - 2 - lipgloss.Height(m.renderStatusBar(m.dimensions))
+
 		m.methodView.SetSize(msg.Width, msg.Height)
 	}
 	return timeCmd
+}
+
+func (m *model) handleMessageInRequestMode(msg tea.Msg) tea.Cmd {
+	if m.currentMode != modeRequest {
+		panic("cannot use request mode handler in non-request mode")
+	}
+	var cmd tea.Cmd
+	m.requestView, cmd = m.requestView.Update(msg)
+	switch msg := msg.(type) {
+	case tea.KeyMsg:
+		switch msg.String() {
+		case "esc":
+			m.currentMode = modeOverview
+		}
+	}
+	return cmd
 }
 
 func (m *model) handleMessageInResponseMode(msg tea.Msg) tea.Cmd {
@@ -179,6 +211,9 @@ func (m *model) handleMessageInOverviewMode(msg tea.Msg) tea.Cmd {
 			m.currentMode = modeMethod
 		case "q":
 			return tea.Quit
+		case "b":
+			m.currentMode = modeRequest
+			m.requestView.Focus()
 		case "esc":
 			m.url.Blur()
 			m.currentMode = modeOverview
@@ -272,11 +307,18 @@ func (m model) View() string {
 	if m.currentMode == modeMethod {
 		return m.methodView.View()
 	}
-	return lipgloss.JoinVertical(lipgloss.Left, lipgloss.JoinHorizontal(lipgloss.Top, m.renderMethod(), m.renderUrlView()), m.renderResponseView(), m.renderStatusBar())
+	method := m.renderMethod()
+	url := m.renderUrlView(modelDimensions{
+		width:  m.dimensions.width/2 - lipgloss.Width(method),
+		height: m.dimensions.height,
+	})
+	requestPanel := lipgloss.JoinVertical(lipgloss.Left, lipgloss.JoinHorizontal(lipgloss.Top, m.renderMethod(), url), m.renderRequestView())
+	responsePanel := lipgloss.JoinVertical(lipgloss.Left, m.renderResponseView(), m.renderStatusBar(m.dimensions))
+	return lipgloss.JoinHorizontal(lipgloss.Top, requestPanel, responsePanel)
 }
 
-func (m model) renderUrlView() string {
-	style := lipgloss.NewStyle().Width(m.width - 2 - lipgloss.Width(m.renderMethod())).Border(lipgloss.NormalBorder())
+func (m model) renderUrlView(dimensions modelDimensions) string {
+	style := lipgloss.NewStyle().Width(dimensions.width - 2).Border(lipgloss.NormalBorder())
 	if m.currentMode == modeUrl {
 		style = style.BorderForeground(lipgloss.Color("#ff0000"))
 	}
@@ -292,6 +334,14 @@ func (m model) renderMethod() string {
 	return style.Render(string(it))
 }
 
+func (m model) renderRequestView() string {
+	style := lipgloss.NewStyle().Border(lipgloss.NormalBorder())
+	if m.currentMode == modeRequest {
+		style = style.BorderForeground(lipgloss.Color("#ff0000"))
+	}
+	return style.Render(m.requestView.View())
+}
+
 func (m model) renderResponseView() string {
 	style := lipgloss.NewStyle().Border(lipgloss.NormalBorder())
 	if m.currentMode == modeResponse {
@@ -300,8 +350,8 @@ func (m model) renderResponseView() string {
 	return style.Render(m.responseView.View())
 }
 
-func (m model) renderStatusBar() string {
-	style := lipgloss.NewStyle().Width(m.width - 2).Border(lipgloss.NormalBorder())
+func (m model) renderStatusBar(dimensions modelDimensions) string {
+	style := lipgloss.NewStyle().Width(dimensions.width - 2).Border(lipgloss.NormalBorder())
 	return style.Render(m.renderTimer())
 }
 
