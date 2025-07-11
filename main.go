@@ -2,6 +2,7 @@ package main
 
 import (
 	"bytes"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"io"
@@ -145,7 +146,7 @@ func (m *model) handleGlobalEvents(msg tea.Msg) tea.Cmd {
 		if msg.err != nil {
 			break
 		}
-		m.responseView.SetContent(msg.response)
+		m.responseView.SetContent(prettify(msg.response))
 	case tea.WindowSizeMsg:
 		m.dimensions = modelDimensions{
 			width:  msg.Width,
@@ -313,7 +314,10 @@ func (m model) View() string {
 		height: m.dimensions.height,
 	})
 	requestPanel := lipgloss.JoinVertical(lipgloss.Left, lipgloss.JoinHorizontal(lipgloss.Top, m.renderMethod(), url), m.renderRequestView())
-	responsePanel := lipgloss.JoinVertical(lipgloss.Left, m.renderResponseView(), m.renderStatusBar(m.dimensions))
+	responsePanel := lipgloss.JoinVertical(lipgloss.Left, m.renderResponseView(), m.renderStatusBar(modelDimensions{
+		width:  m.dimensions.width / 2,
+		height: m.dimensions.height,
+	}))
 	return lipgloss.JoinHorizontal(lipgloss.Top, requestPanel, responsePanel)
 }
 
@@ -363,6 +367,16 @@ func (m model) renderTimer() string {
 		duration = m.timer.lastDuration
 	}
 	return duration.Round(time.Millisecond).String()
+}
+
+func prettify(response string) string {
+	var resp map[string]any
+	err := json.Unmarshal([]byte(response), &resp)
+	if err != nil {
+		return response
+	}
+	t, _ := json.MarshalIndent(resp, "", "    ")
+	return string(t)
 }
 
 func main() {
