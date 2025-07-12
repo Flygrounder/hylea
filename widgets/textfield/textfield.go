@@ -1,4 +1,4 @@
-package method
+package textfield
 
 import (
 	"github.com/charmbracelet/bubbles/textinput"
@@ -11,21 +11,14 @@ type Model struct {
 	input    textinput.Model
 }
 
-func New() Model {
-	input := textinput.New()
-	input.SetValue("GET")
-	input.Prompt = ""
+func New(input textinput.Model) Model {
 	return Model{
 		input: input,
 	}
 }
 
 func (m Model) View() string {
-	var color lipgloss.TerminalColor
-	if m.hasFocus {
-		color = lipgloss.Color("#ff0000")
-	}
-	return lipgloss.NewStyle().Border(lipgloss.NormalBorder()).BorderForeground(color).Render(m.input.View())
+	return m.getStyle().Render(m.input.View())
 }
 
 func (m Model) Update(msg tea.Msg) (Model, tea.Cmd) {
@@ -57,4 +50,17 @@ func (m *Model) Focus() tea.Cmd {
 
 func (m Model) Focused() bool {
 	return m.hasFocus
+}
+
+func (m *Model) SetWidth(width int) {
+	const cursorWidth = 1
+	m.input.Width = width - m.getStyle().GetHorizontalBorderSize() - cursorWidth
+}
+
+func (m *Model) getStyle() lipgloss.Style {
+	var color lipgloss.TerminalColor
+	if m.hasFocus {
+		color = lipgloss.Color("#ff0000")
+	}
+	return lipgloss.NewStyle().Border(lipgloss.NormalBorder()).BorderForeground(color)
 }

@@ -13,7 +13,7 @@ import (
 	"github.com/charmbracelet/bubbles/viewport"
 	tea "github.com/charmbracelet/bubbletea"
 	"github.com/charmbracelet/lipgloss"
-	"github.com/flygrounder/hylea/widgets/method"
+	"github.com/flygrounder/hylea/widgets/textfield"
 )
 
 type mode int
@@ -29,9 +29,9 @@ const (
 type model struct {
 	dimensions   modelDimensions
 	client       *http.Client
-	method       method.Model
 	currentMode  mode
-	url          textinput.Model
+	method       textfield.Model
+	url          textfield.Model
 	requestView  textarea.Model
 	responseView viewport.Model
 	timer        requestTimer
@@ -56,12 +56,21 @@ type responseMessage struct {
 }
 
 func initialModel() model {
-	url := textinput.New()
-	url.Prompt = ""
+	methodInput := textinput.New()
+	methodInput.SetValue("GET")
+	methodInput.SetSuggestions([]string{"GET", "POST"})
+	methodInput.ShowSuggestions = true
+	methodInput.Prompt = ""
+	method := textfield.New(methodInput)
+
+	urlInput := textinput.New()
+	urlInput.Prompt = ""
+	url := textfield.New(urlInput)
+
 	return model{
 		url:         url,
 		client:      http.DefaultClient,
-		method:      method.New(),
+		method:      method,
 		requestView: textarea.New(),
 	}
 }
@@ -78,6 +87,9 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		handlerCmd = m.handleMessageInOverviewMode(msg)
 	case modeUrl:
 		handlerCmd = m.handleMessageInUrlMode(msg)
+		if !m.url.Focused() {
+			m.currentMode = modeOverview
+		}
 	case modeResponse:
 		handlerCmd = m.handleMessageInResponseMode(msg)
 	case modeMethod:
@@ -112,8 +124,9 @@ func (m *model) handleGlobalEvents(msg tea.Msg) tea.Cmd {
 			width:  msg.Width,
 			height: msg.Height,
 		}
+		m.url.SetWidth(msg.Width/2 - lipgloss.Width(m.method.View()))
 		m.requestView.SetWidth(msg.Width/2 - 2)
-		m.requestView.SetHeight(msg.Height - 2 - lipgloss.Height(m.renderUrlView(m.dimensions)))
+		m.requestView.SetHeight(msg.Height - 2 - lipgloss.Height(m.url.View()))
 
 		m.responseView.Width = msg.Width/2 - 2
 		m.responseView.Height = msg.Height - 2 - lipgloss.Height(m.renderStatusBar(m.dimensions))
@@ -185,21 +198,10 @@ func (m *model) handleMessageInUrlMode(msg tea.Msg) tea.Cmd {
 	if m.currentMode != modeUrl {
 		panic("cannot use url mode handler in non-url mode")
 	}
-	var widgetCmd, httpCmd tea.Cmd
-	m.url, widgetCmd = m.url.Update(msg)
-	switch msg := msg.(type) {
-	case tea.KeyMsg:
-		switch msg.String() {
-		case "esc":
-			m.url.Blur()
-			m.currentMode = modeOverview
-		case "enter":
-			m.url.Blur()
-			m.currentMode = modeOverview
-			httpCmd = m.startRequest()
-		}
-	}
-	return tea.Batch(widgetCmd, httpCmd)
+
+	var cmd tea.Cmd
+	m.url, cmd = m.url.Update(msg)
+	return cmd
 }
 
 func (m *model) startRequest() tea.Cmd {
@@ -242,6 +244,7 @@ func (m *model) handleMessageInMethodMode(msg tea.Msg) tea.Cmd {
 	if m.currentMode != modeMethod {
 		panic("cannot use method mode handler in non-method mode")
 	}
+
 	var cmd tea.Cmd
 	m.method, cmd = m.method.Update(msg)
 	return cmd
@@ -249,24 +252,13 @@ func (m *model) handleMessageInMethodMode(msg tea.Msg) tea.Cmd {
 
 func (m model) View() string {
 	method := m.method.View()
-	url := m.renderUrlView(modelDimensions{
-		width:  m.dimensions.width/2 - lipgloss.Width(method),
-		height: m.dimensions.height,
-	})
+	url := m.url.View()
 	requestPanel := lipgloss.JoinVertical(lipgloss.Left, lipgloss.JoinHorizontal(lipgloss.Top, method, url), m.renderRequestView())
 	responsePanel := lipgloss.JoinVertical(lipgloss.Left, m.renderResponseView(), m.renderStatusBar(modelDimensions{
 		width:  m.dimensions.width / 2,
 		height: m.dimensions.height,
 	}))
 	return lipgloss.JoinHorizontal(lipgloss.Top, requestPanel, responsePanel)
-}
-
-func (m model) renderUrlView(dimensions modelDimensions) string {
-	style := lipgloss.NewStyle().Width(dimensions.width - 2).Border(lipgloss.NormalBorder())
-	if m.currentMode == modeUrl {
-		style = style.BorderForeground(lipgloss.Color("#ff0000"))
-	}
-	return style.Render(m.url.View())
 }
 
 func (m model) renderRequestView() string {
