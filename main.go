@@ -59,8 +59,10 @@ func initialModel() model {
 	methodInput := textinput.New()
 	methodInput.SetValue("GET")
 	methodInput.Prompt = ""
+	methodInput.SetSuggestions([]string{"GET", "POST", "PUT", "PATCH", "DELETE"})
+	methodInput.ShowSuggestions = true
 	method := textfield.New(methodInput)
-	method.SetWidth(9)
+	method.SetWidth(10)
 
 	urlInput := textinput.New()
 	urlInput.Prompt = ""
@@ -79,30 +81,41 @@ func (m model) Init() tea.Cmd {
 }
 
 func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
-	var handlerCmd, elapsedCmd tea.Cmd
+	var modeCmd tea.Cmd
 
 	switch m.currentMode {
 	case modeOverview:
-		handlerCmd = m.handleMessageInOverviewMode(msg)
+		modeCmd = m.handleMessageInOverviewMode(msg)
 	case modeUrl:
-		handlerCmd = m.handleMessageInUrlMode(msg)
+		modeCmd = m.handleMessageInUrlMode(msg)
 		if !m.url.Focused() {
 			m.currentMode = modeOverview
 		}
 	case modeResponse:
-		handlerCmd = m.handleMessageInResponseMode(msg)
+		modeCmd = m.handleMessageInResponseMode(msg)
 	case modeMethod:
-		handlerCmd = m.handleMessageInMethodMode(msg)
+		modeCmd = m.handleMessageInMethodMode(msg)
 		if !m.method.Focused() {
 			m.currentMode = modeOverview
 		}
 	case modeRequest:
-		handlerCmd = m.handleMessageInRequestMode(msg)
+		modeCmd = m.handleMessageInRequestMode(msg)
 	}
 
 	globalCmd := m.handleGlobalEvents(msg)
 
-	return m, tea.Batch(handlerCmd, elapsedCmd, globalCmd)
+	m.recalculateDimensions()
+
+	return m, tea.Batch(modeCmd, globalCmd)
+}
+
+func (m *model) recalculateDimensions() {
+	m.url.SetWidth(m.dimensions.width/2 - lipgloss.Width(m.method.View()))
+	m.requestView.SetWidth(m.dimensions.width/2 - 2)
+	m.requestView.SetHeight(m.dimensions.height - 2 - lipgloss.Height(m.url.View()))
+
+	m.responseView.Width = m.dimensions.width/2 - 2
+	m.responseView.Height = m.dimensions.height - 2 - lipgloss.Height(m.renderStatusBar(m.dimensions))
 }
 
 func (m *model) handleGlobalEvents(msg tea.Msg) tea.Cmd {
@@ -123,13 +136,8 @@ func (m *model) handleGlobalEvents(msg tea.Msg) tea.Cmd {
 			width:  msg.Width,
 			height: msg.Height,
 		}
-		m.url.SetWidth(msg.Width/2 - lipgloss.Width(m.method.View()))
-		m.requestView.SetWidth(msg.Width/2 - 2)
-		m.requestView.SetHeight(msg.Height - 2 - lipgloss.Height(m.url.View()))
-
-		m.responseView.Width = msg.Width/2 - 2
-		m.responseView.Height = msg.Height - 2 - lipgloss.Height(m.renderStatusBar(m.dimensions))
 	}
+
 	return timeCmd
 }
 
