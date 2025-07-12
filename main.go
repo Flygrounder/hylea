@@ -58,10 +58,9 @@ type responseMessage struct {
 func initialModel() model {
 	methodInput := textinput.New()
 	methodInput.SetValue("GET")
-	methodInput.SetSuggestions([]string{"GET", "POST"})
-	methodInput.ShowSuggestions = true
 	methodInput.Prompt = ""
 	method := textfield.New(methodInput)
+	method.SetWidth(9)
 
 	urlInput := textinput.New()
 	urlInput.Prompt = ""
@@ -216,7 +215,7 @@ func (m *model) startRequest() tea.Cmd {
 		case "GET":
 			resp, err = m.client.Get(m.url.Value())
 		case "POST":
-			resp, err = m.client.Post(m.url.Value(), "application/json", bytes.NewReader([]byte("{}")))
+			resp, err = m.client.Post(m.url.Value(), "application/json", bytes.NewReader([]byte(m.requestView.Value())))
 		}
 		if err != nil {
 			return responseMessage{
