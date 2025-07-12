@@ -3,18 +3,17 @@ package main
 import (
 	"bytes"
 	"encoding/json"
-	"errors"
 	"fmt"
 	"io"
 	"net/http"
 	"time"
 
-	"github.com/charmbracelet/bubbles/list"
 	"github.com/charmbracelet/bubbles/textarea"
 	"github.com/charmbracelet/bubbles/textinput"
 	"github.com/charmbracelet/bubbles/viewport"
 	tea "github.com/charmbracelet/bubbletea"
 	"github.com/charmbracelet/lipgloss"
+	"github.com/flygrounder/hylea/widgets/method"
 )
 
 type mode int
@@ -30,12 +29,12 @@ const (
 type model struct {
 	dimensions   modelDimensions
 	client       *http.Client
+	method       method.Model
 	currentMode  mode
 	url          textinput.Model
 	requestView  textarea.Model
 	responseView viewport.Model
 	timer        requestTimer
-	methodView   list.Model
 }
 
 type modelDimensions struct {
@@ -59,17 +58,10 @@ type responseMessage struct {
 func initialModel() model {
 	url := textinput.New()
 	url.Prompt = ""
-	methodView := list.New([]list.Item{
-		item("GET"),
-		item("POST"),
-	}, itemDelegate{}, 0, 0)
-	methodView.Title = "HTTP Method"
-	methodView.Select(0)
-	methodView.DisableQuitKeybindings()
 	return model{
 		url:         url,
 		client:      http.DefaultClient,
-		methodView:  methodView,
+		method:      method.New(),
 		requestView: textarea.New(),
 	}
 }
@@ -90,6 +82,9 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		handlerCmd = m.handleMessageInResponseMode(msg)
 	case modeMethod:
 		handlerCmd = m.handleMessageInMethodMode(msg)
+		if !m.method.Focused() {
+			m.currentMode = modeOverview
+		}
 	case modeRequest:
 		handlerCmd = m.handleMessageInRequestMode(msg)
 	}
@@ -122,8 +117,6 @@ func (m *model) handleGlobalEvents(msg tea.Msg) tea.Cmd {
 
 		m.responseView.Width = msg.Width/2 - 2
 		m.responseView.Height = msg.Height - 2 - lipgloss.Height(m.renderStatusBar(m.dimensions))
-
-		m.methodView.SetSize(msg.Width, msg.Height)
 	}
 	return timeCmd
 }
@@ -164,38 +157,36 @@ func (m *model) handleMessageInOverviewMode(msg tea.Msg) tea.Cmd {
 	if m.currentMode != modeOverview {
 		panic("cannot use overview mode handler in non-overview mode")
 	}
-	var httpCmd, timeCmd tea.Cmd
+	var cmd tea.Cmd
 	switch msg := msg.(type) {
 	case tea.KeyMsg:
 		switch msg.String() {
 		case "u":
 			m.currentMode = modeUrl
-			m.url.Focus()
+			cmd = m.url.Focus()
 		case "r":
 			m.currentMode = modeResponse
 		case "m":
 			m.currentMode = modeMethod
+			cmd = m.method.Focus()
 		case "q":
 			return tea.Quit
 		case "b":
 			m.currentMode = modeRequest
-			m.requestView.Focus()
-		case "esc":
-			m.url.Blur()
-			m.currentMode = modeOverview
+			cmd = m.requestView.Focus()
 		case "enter":
-			httpCmd = m.startRequest()
+			cmd = m.startRequest()
 		}
 	}
-	return tea.Sequence(timeCmd, httpCmd)
+	return cmd
 }
 
 func (m *model) handleMessageInUrlMode(msg tea.Msg) tea.Cmd {
-	var widgetCmd, httpCmd tea.Cmd
-	m.url, widgetCmd = m.url.Update(msg)
 	if m.currentMode != modeUrl {
 		panic("cannot use url mode handler in non-url mode")
 	}
+	var widgetCmd, httpCmd tea.Cmd
+	m.url, widgetCmd = m.url.Update(msg)
 	switch msg := msg.(type) {
 	case tea.KeyMsg:
 		switch msg.String() {
@@ -218,14 +209,8 @@ func (m *model) startRequest() tea.Cmd {
 	httpCmd := func() tea.Msg {
 		var resp *http.Response
 		var err error
-		it, ok := m.methodView.SelectedItem().(item)
-		if !ok {
-			return responseMessage{
-				tag: m.timer.requestTag,
-				err: errors.New("failed to get selected item"),
-			}
-		}
-		switch it {
+		curMethod := m.method.Value()
+		switch curMethod {
 		case "GET":
 			resp, err = m.client.Get(m.url.Value())
 		case "POST":
@@ -254,31 +239,21 @@ func (m *model) startRequest() tea.Cmd {
 }
 
 func (m *model) handleMessageInMethodMode(msg tea.Msg) tea.Cmd {
-	var cmd tea.Cmd
-	m.methodView, cmd = m.methodView.Update(msg)
 	if m.currentMode != modeMethod {
 		panic("cannot use method mode handler in non-method mode")
 	}
-	switch msg := msg.(type) {
-	case tea.KeyMsg:
-		switch msg.String() {
-		case "enter":
-			m.currentMode = modeOverview
-		}
-	}
+	var cmd tea.Cmd
+	m.method, cmd = m.method.Update(msg)
 	return cmd
 }
 
 func (m model) View() string {
-	if m.currentMode == modeMethod {
-		return m.methodView.View()
-	}
-	method := m.renderMethod()
+	method := m.method.View()
 	url := m.renderUrlView(modelDimensions{
 		width:  m.dimensions.width/2 - lipgloss.Width(method),
 		height: m.dimensions.height,
 	})
-	requestPanel := lipgloss.JoinVertical(lipgloss.Left, lipgloss.JoinHorizontal(lipgloss.Top, m.renderMethod(), url), m.renderRequestView())
+	requestPanel := lipgloss.JoinVertical(lipgloss.Left, lipgloss.JoinHorizontal(lipgloss.Top, method, url), m.renderRequestView())
 	responsePanel := lipgloss.JoinVertical(lipgloss.Left, m.renderResponseView(), m.renderStatusBar(modelDimensions{
 		width:  m.dimensions.width / 2,
 		height: m.dimensions.height,
@@ -292,15 +267,6 @@ func (m model) renderUrlView(dimensions modelDimensions) string {
 		style = style.BorderForeground(lipgloss.Color("#ff0000"))
 	}
 	return style.Render(m.url.View())
-}
-
-func (m model) renderMethod() string {
-	style := lipgloss.NewStyle().Border(lipgloss.NormalBorder()).Width(4)
-	it, ok := m.methodView.SelectedItem().(item)
-	if !ok {
-		return ""
-	}
-	return style.Render(string(it))
 }
 
 func (m model) renderRequestView() string {
